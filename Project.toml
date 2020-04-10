@@ -3,6 +3,9 @@ uuid = "e6315776-aa1a-4de9-9781-5302fc3234aa"
 authors = ["hustf <hustf@users.noreply.github.com>"]
 version = "0.1.0"
 
+[deps]
+FileWatching = "7b1f6079-737a-58dc-b8bc-7a2ca5c1b5ee"
+
 [compat]
 julia = "1"
 
