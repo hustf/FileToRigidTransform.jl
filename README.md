@@ -9,7 +9,7 @@ Rotations are based on quaternions to facilitate screen-aligned rotation axes.
 
 
 ## Configuration
-![Image of configuration](https://github.com/hustf/FileToRigidTransform.jl/tree/master/images/configuration.png)
+![Image of configuration](images/configuration.png)
 
 ## Usage
 
