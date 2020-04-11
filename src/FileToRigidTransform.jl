@@ -6,12 +6,14 @@ using FileToRigidTransform; FileToRigidTransform.run()
 Follow directions, or update configuration files in ~/.julia_hid/ConfigFo/
 """
 module FileToRigidTransform
-using Base, FileWatching
+using FileWatching
 const FOLDER = joinpath(homedir(), ".julia_hid")
 const CONFIGFO = joinpath(FOLDER, "ConfigFo")
 const TRANSFORMFO = joinpath(FOLDER, "TransformFo")
-const TIMEOUT = 30 # seconds
+const TIMEOUT = 30.0 # seconds
+const RETRY_TIME = 0.5 # seconds
 const TIMEZERO = time()
+
 "String descriptors for a device from file name"
 struct DevConfig
     filename::String
@@ -30,25 +32,18 @@ function minus_ds(x::T, y::T) where T <: DevState
     if length(x.values) == length(y.values)
         DevState(x.values - y.values, x.timestamp - y.timestamp, x.proceed || y.proceed)
     else
-        @warn "Could not subtract, vecor lengths, x $(length(x.values)), y $(length(y.values))"
-        DevState()
+        @debug "Could not subtract, vecor lengths, x $(length(x.values)), y $(length(y.values))"
+        x
     end
-end
-function run()
-    devconfig = devices_configuration_vector()
-    monitor(devconfig)
 end
 
-function monitor(devconfig)
-    # Create file monitors
-    monitors = Vector{Task}()
-    for d in devconfig
-        fina = joinpath(FOLDER, d.filename)
-        monitor =  @async monitor_file(fina)
-        push!(monitors, monitor)
-    end
-    monitors
+"Main, keyword argument timeout in seconds"
+function run(timeout = TIMEOUT, func = logit)
+    devconfig = devices_configuration_vector()
+    monitor(devconfig, timeout, func)
 end
+
+
 
 function devices_configuration_vector()
     dev_conf_vec = Vector{DevConfig}()
@@ -76,12 +71,13 @@ function devices_configuration_vector()
                         end
                     else
                         @info("Creating template configuration file $configfi")
-                        open(configfi, write = true) do f
-                            println(f, "# This file is read when calling FileToRigidTransformations.run()")
-                            println(f, "# Assign names to axes. ")
-                            println(f, "# Reserved for rigid transformations: ")
-                            println(f, "#     Surge, Sway, Heave, Roll, Pitch, Yaw")
-                            println(f, "[Surge, Sway, Heave, Roll, Pitch, Yaw, But1, But2, But3, But4]")
+                        open(configfi, write = true) do ios
+                            println(ios, "# This file is read when calling FileToRigidTransformations.run()")
+                            println(ios, "# Assign names to byte positions. A channel is one byte. Reserved names for translation:")
+                            println(ios, "#Surge1 Surge2 Sway1  Sway2  Heave1 Heave2")
+                            println(ios, "# Reserved names for rotation:")
+                            println(ios, "#Roll1  Roll2  Pitch1 Pitch2 Yaw1   Yaw2  ")
+                            println(ios, " chn1 chn2 chn3 chn4 chn5 chn6 chn7 chn8 chn9 chn10 chn11 chn12 chn13 chn14 chn15 chn16")
                         end
                         @warn "Retry with new device configuration by rerunning FileToRigidTransform.run()"
                         return dev_conf_vec
@@ -119,7 +115,7 @@ function configuration_vector(filename)
         end
         st
     end
-    strip.(split(strconfig[2:findfirst(']', strconfig) - 1], ","))
+    strip.(split(strconfig, " ", keepempty = false))
 end
 "Read current state from file"
 function devstate(filename)
@@ -141,11 +137,12 @@ function devstate(filename)
         end
         st, tist
     end
-    @assert st !="" "No state read from $filename \n\t - If WinControllerToFile.subscribe() is running, you may have to give input through the device"
-    @assert tist !="" "No time stamp read from $filename"
-    strstatevec =  split(st[2:findfirst(']', st) - 1], ",")
+    if st == "" || tist == ""
+        return DevState([], 0, false)
+    end
+    strstatevec =  split(st, " ", keepempty = false )
     statevec = parse.(Int, strstatevec)
-    timestamp = parse(Float64, split(tist, " ")[1])
+    timestamp = parse(Float64, split(tist, " ", keepempty = false)[1])
     DevState(statevec, timestamp, true)
 end
 
@@ -157,48 +154,81 @@ function devstate_updated(timeout, filename)
     if fileevent.renamed || fileevent.timedout
         return DevState(prevstate.values, prevstate.timestamp, false)
     end
-    devstate(filename)
+
+    ds = devstate(filename)
+    t0 = time()
+    while ds.values == Int[] && time() - t0 < RETRY_TIME
+        # May occur if we are reading before the file is closed for writing. Retry twice before accepting.
+        sleep(0.01)
+        ds = devstate(filename)
+    end
+    if time() - t0 >= RETRY_TIME
+        @warn "No state read from \n\t$filename \n\tin $RETRY_TIME s. If WinControllerToFile.subscribe() is running, you may have to populate the file by giving input through the device"
+    end
+    ds
 end
 
-function monitor_file(filename)
+"""
+Monitor vector of devices. The given function argument is called at every update.
+Arguments to func are (ios, d.channeldictionary, dsprev, ds)
+"""
+function monitor(devconfig, timeout, func)
+    # Create file monitors
+    monitors = Vector{Task}()
+    for d in devconfig
+        fina = joinpath(FOLDER, d.filename)
+        monitor =  @async monitor_file(fina, d,timeout, func)
+        push!(monitors, monitor)
+    end
+    monitors
+end
+
+
+
+"""
+Monitor a single device. The given function argument is called at every update.
+Arguments to func are (ios, d.channeldictionary, dsprev, ds)
+"""
+function monitor_file(filename, d::DevConfig, timeout, func)
     _, shfina = splitdir(filename)
     logfile = joinpath(TRANSFORMFO, shfina)
     t0 = localtime()
-    open(logfile, write = true) do f
+    open(logfile, write = true) do ios
         ds = DevState()
         dsprev = ds
         tpassed = localtime() - t0
         while true
             tpassed = localtime() - t0
-            ds = devstate_updated(TIMEOUT-tpassed, filename)
-            logit(f, dsprev, ds)
-            dsprev = ds
+            ds = devstate_updated(timeout-tpassed, filename)
             !dsprev.proceed && break
-            if (tpassed > TIMEOUT)
-                @info "Exit monitor_file due to timeout"
+            func(ios, d.channeldictionary, dsprev, ds)
+            dsprev = ds
+            if (tpassed > timeout)
+                @info "Exit monitor_file due to timeout $timeout s"
                 break
             end
-            flush(f)
+            flush(ios)
         end
         ds
     end
-    @info "Exit logging to $logfile after $(floor(localtime()-t0))"
+    @info "Exit logging to \n\t$logfile \n\tafter $(floor(localtime()-t0)) s"
 end
 localtime() = time() - TIMEZERO
-function logit(f, dsprev, ds)
+
+"This is a byte logger, used as the default callback function"
+function logit(ios, d::Dict{String,Int}, dsprev, ds)
+    dic = Dict{Int, String}(value => key for (key, value) in d)
     Δds = minus_ds(ds, dsprev)
-    if length(Δds.values) > 0
-        # Log channels with change
-        for (i, Δx, x) in zip(1:length(ds.values), Δds.values, ds.values)
-            if Δx != 0
-                if i == 10 #∉ (2, 4, 6, 8, 10, 12)
-                    print(f, i, " => ", x, " \t")
-                    print(stderr, i, " => ", x, " \t")
-                end
-            end
-        end
-        print(f, "\n")
-        print(stderr, "\n")
+    sv = map((x , y)-> x * y==0 ? "" : string(x) , ds.values, Δds.values)
+    str = join(lpad.(sv, 8))
+    hv = map(sv, 1:length(sv)) do s, i
+        s == "" ? "" : get(dic, i, "NA!")
     end
+    strh = join(lpad.(hv, 8))
+    println(ios, strh)
+    println(stderr, strh)
+    println(ios, str)
+    println(stderr, str)
 end
+
 end # module

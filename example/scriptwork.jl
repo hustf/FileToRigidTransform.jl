@@ -1,5 +1,6 @@
-using WinControllerToFile
-WinControllerToFile.subscribe()
+#using WinControllerToFile
+#WinControllerToFile.subscribe()
 # TODO check for existing subscriptions
 using FileToRigidTransform
-tsk = FileToRigidTransform.run()[1]
+FileToRigidTransform.run()
+
