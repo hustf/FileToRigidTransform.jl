@@ -7,6 +7,7 @@ Follow directions, or update configuration files in ~/.julia_hid/ConfigFo/
 """
 module FileToRigidTransform
 using FileWatching
+
 const FOLDER = joinpath(homedir(), ".julia_hid")
 const CONFIGFO = joinpath(FOLDER, "ConfigFo")
 const TRANSFORMFO = joinpath(FOLDER, "TransformFo")
@@ -17,7 +18,7 @@ const TIMEZERO = time()
 "String descriptors for a device from file name"
 struct DevConfig
     filename::String
-    channeldictionary::Dict{String,Int}
+    bytebynamedict::Dict{String,Int}
 end
 DevConfig()= DevConfig("", Dict{String, Int}())
 
@@ -28,7 +29,8 @@ struct DevState
 end
 DevState() = DevState(Vector{Int}(), localtime(), true)
 
-function minus_ds(x::T, y::T) where T <: DevState
+"Find device state change"
+function minus_ds(x::T, y::T) where {T <: DevState}
     if length(x.values) == length(y.values)
         DevState(x.values - y.values, x.timestamp - y.timestamp, x.proceed || y.proceed)
     else
@@ -37,14 +39,31 @@ function minus_ds(x::T, y::T) where T <: DevState
     end
 end
 
-"Main, keyword argument timeout in seconds"
-function run(timeout = TIMEOUT, func = logit)
-    devconfig = devices_configuration_vector()
-    monitor(devconfig, timeout, func)
+"""
+    run(timeout = TIMEOUT, func = logbytewise) -> Vector{Task}
+
+Start reacting to changes in device(s) state as given and updated in files. 
+The files which are present in a folder structure defines how the state is interpreted.
+
+Default behaviour is logging the interpreted device state, see keyword arguments.
+"""
+function run(timeout = TIMEOUT, func = logbytewise)
+    devconfvec = devices_configuration_vector()
+    monitor(devconfvec, timeout, func)
 end
 
 
+"""
+    devices_configuration_vector() -> Vector{DevConfig}
 
+Use folder structure to locate: 
+- devices monintored (subscribed), i.e. another process is updating a file with device state
+- device configuration, i.e. a text file where the user can describe the conversion from device state to input variables for transformations
+
+If a configuration file is missing, a template file is generated based on the number of bytes in the device state file.
+
+We give warnings when folder structure is missing. Creating folders programmatically might cause difficulties concerning folder ownership.
+"""
 function devices_configuration_vector()
     dev_conf_vec = Vector{DevConfig}()
     if ispath(FOLDER)
@@ -58,7 +77,7 @@ function devices_configuration_vector()
                     configfi = joinpath(CONFIGFO, shortfi)
                     if isfile(configfi)
                         # Found both a device state and a device configuration file.
-                        chdi = channeldict(fi, configfi)
+                        chdi = bytebyname(fi, configfi)
                         if length(chdi) > 0
                             devconfig = DevConfig(shortfi, chdi)
                             push!(dev_conf_vec, devconfig)
@@ -95,14 +114,19 @@ function devices_configuration_vector()
     end
     dev_conf_vec
 end
-"Make a channel name => channel no. dictionary from files.
-Also checks that state and configuration files have the same number of elements"
-function channeldict(fi, configfi)
+"""
+    bytebyname(fi, configfi) -> Dict{String, Int}
+
+Make a channel name => byte no. dictionary from files.
+Also checks that state and configuration files have the same number of elements
+"""
+function bytebyname(fi, configfi)
     statevec = devstate(fi).values
     strconfigvec = configuration_vector(configfi)
     pairs = (s=>i for (i, s) in enumerate(strconfigvec))
     Dict{String, Int}(pairs)
 end
+
 "Read vector of strings from commented text file"
 function configuration_vector(filename)
     strconfig = open(filename, read = true) do f
@@ -169,15 +193,19 @@ function devstate_updated(timeout, filename)
 end
 
 """
-Monitor vector of devices. The given function argument is called at every update.
-Arguments to func are (ios, d.channeldictionary, dsprev, ds)
+    monitor(devconfvec, timeout, func) -> Vector{Task}
+
+Monitor vector of devices. The 'func' argument is typically used for 
+for logging.
+
+Arguments to 'func' are (ios::IOstream, d::DevConfig, dsprev::DevState, ds::DevState)
 """
-function monitor(devconfig, timeout, func)
+function monitor(devconfvec, timeout, func)
     # Create file monitors
     monitors = Vector{Task}()
-    for d in devconfig
+    for d in devconfvec
         fina = joinpath(FOLDER, d.filename)
-        monitor =  @async monitor_file(fina, d,timeout, func)
+        monitor =  @async monitor_file(fina, d, timeout, func)
         push!(monitors, monitor)
     end
     monitors
@@ -187,7 +215,7 @@ end
 
 """
 Monitor a single device. The given function argument is called at every update.
-Arguments to func are (ios, d.channeldictionary, dsprev, ds)
+Arguments to func are (ios, d.bytebynamedict, dsprev, ds)
 """
 function monitor_file(filename, d::DevConfig, timeout, func)
     _, shfina = splitdir(filename)
@@ -201,7 +229,7 @@ function monitor_file(filename, d::DevConfig, timeout, func)
             tpassed = localtime() - t0
             ds = devstate_updated(timeout-tpassed, filename)
             !dsprev.proceed && break
-            func(ios, d.channeldictionary, dsprev, ds)
+            func(ios, d, dsprev, ds)
             dsprev = ds
             if (tpassed > timeout)
                 @info "Exit monitor_file due to timeout $timeout s"
@@ -216,8 +244,8 @@ end
 localtime() = time() - TIMEZERO
 
 "This is a byte logger, used as the default callback function"
-function logit(ios, d::Dict{String,Int}, dsprev, ds)
-    dic = Dict{Int, String}(value => key for (key, value) in d)
+function logbytewise(ios, d, dsprev, ds)
+    dic = Dict{Int, String}(value => key for (key, value) in d.bytebynamedict)
     Δds = minus_ds(ds, dsprev)
     sv = map((x , y)-> x * y==0 ? "" : string(x) , ds.values, Δds.values)
     str = join(lpad.(sv, 8))
