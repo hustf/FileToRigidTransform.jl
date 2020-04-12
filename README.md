@@ -10,14 +10,15 @@ Rotations are based on quaternions to facilitate screen-aligned rotation axes.
 
 ## Configuration
 ![Image of configuration](images/configuration.png)
+![Image of bitlogger](images/bitlogger.png)
 
 ## Usage
 
 See example/scriptwork.jl 
 
 ## TODO
-1) Bitwise logger
-2) In configuration, add bit specification
+1) Check timeout duration
+2) (In configuration, add bit specification)
 3) Interpretation logger
 4) Current quaternion logger
 5) Current quaternion callback
