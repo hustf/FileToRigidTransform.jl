@@ -75,3 +75,13 @@ end
 
 # The default Juno / Atom display works nicely with standard output
 Base.show(io::IO, ::MIME"application/prs.juno.inline", ds::DevState) = Base.show(io, v)
+
+###############
+# Utilty
+###############
+function bytestring(b::UInt8)
+    io = IOBuffer()
+    bs = string(b, base=2, pad = 8)
+    print(io, bs[1:4], " ", bs[5:8])
+    String(take!(io))
+end

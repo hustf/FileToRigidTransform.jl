@@ -6,7 +6,8 @@ using FileToRigidTransform; FileToRigidTransform.subscribe()
 Follow directions, or update configuration files in ~/.julia_hid/ConfigFo/
 """
 module FileToRigidTransform
-using FileWatching
+import FileWatching.watch_file
+import Base.getindex
 
 const FOLDER = joinpath(homedir(), ".julia_hid")
 const CONFIGFO = joinpath(FOLDER, "ConfigFo")
@@ -22,13 +23,14 @@ struct DevConfig
 end
 DevConfig()= DevConfig("", Dict{String, Int}())
 
-"A structure for 'show' dispatching"
+"A structure for 'show' dispatching. Could otherwise use Base.CodeUnits <: DenseArray, but we don't need the functionality."
 struct Bytevector
     data::Vector{UInt8}
 end
 Bytevector() = Bytevector(UInt8[])
 Bytevector(v::Array{Int8,1 }) = Bytevector(Array{UInt8,1}(v))
-
+Base.getindex(bv::Bytevector, i::Int) = getindex(bv.data, i)
+Base.length(bv::Bytevector) = length(bv.data)
 struct DevState
     values::Bytevector
     timestamp::Float64
@@ -38,10 +40,12 @@ DevState() = DevState(Bytevector(), localtime(), true)
 DevState(v::Array, t, p) = DevState(Bytevector(v), t, p)
 
 include("show_devstate.jl")
+include("extract_from_rawdata.jl")
+include("loggers.jl")
 
 "Find device state change"
 function minus_ds(x::T, y::T) where {T <: DevState}
-    if length(x.values.data) == length(y.values.data)
+    if length(x.values) == length(y.values)
         DevState(x.values.data - y.values.data, x.timestamp - y.timestamp, x.proceed || y.proceed)
     else
         @debug "Could not subtract, vecor lengths, x $(length(x.values.data)), y $(length(y.values.data))"
@@ -55,7 +59,10 @@ end
 Start reacting to changes in device(s) state as given and updated in files. 
 The files which are present in a folder structure defines how the state is interpreted.
 
-Default behaviour is logging the interpreted device state, see keyword arguments.
+Default behaviour is logging the interpreted device state to a file and to screen, see keyword arguments.
+
+Tip: To see error messages from failed tasks, display them individually, e.g. 
+    julia> ans[1]
 """
 function subscribe(;timeout = TIMEOUT, func = logbytewise)
     devconfvec = devices_configuration_vector()
@@ -127,8 +134,7 @@ end
 """
     bytebyname(fi, configfi) -> Dict{String, Int}
 
-Make a channel name => byte no. dictionary from files.
-Also checks that state and configuration files have the same number of elements
+Make a channel name => byte no. dictionary given two corresponding file names.
 """
 function bytebyname(fi, configfi)
     statevec = devstate(fi).values
@@ -180,7 +186,12 @@ function devstate(filename)
     DevState(statevec, timestamp, true)
 end
 
-"Read state from file when file is updated."
+"""
+    devstate_updated(timeout, filename) -> DevState
+
+Read state from file when file is updated.
+If the file is (momentarily) unreadable, retry during RETRY_TIME.
+"""
 function devstate_updated(timeout, filename)
     prevstate = devstate(filename)
     # Yield to other tasks while waiting for file change
@@ -190,13 +201,13 @@ function devstate_updated(timeout, filename)
     end
 
     ds = devstate(filename)
-    t0 = time()
-    while ds.values.data == UInt8[] && time() - t0 < RETRY_TIME
+    t0 = localtime()
+    while length(ds.values) == 0 && localtime() - t0 < RETRY_TIME
         # May occur if we are reading before the file is closed for writing. Retry twice before accepting.
         sleep(0.01)
         ds = devstate(filename)
     end
-    if time() - t0 >= RETRY_TIME
+    if localtime() - t0 >= RETRY_TIME + 0.01
         @warn "No state read from \n\t$filename \n\tin $RETRY_TIME s. If WinControllerToFile.subscribe() is running, you may have to populate the file by giving input through the device"
     end
     ds
@@ -253,51 +264,7 @@ function monitor_file(filename, d::DevConfig, timeout, func)
 end
 localtime() = time() - TIMEZERO
 
-"This is a byte logger, used as the default callback function"
-function logbytewise(ios, devconf, dsprev, ds)
-    dic = Dict{Int, String}(value => key for (key, value) in devconf.bytebynamedict)
-    Δds = minus_ds(ds, dsprev)
-    sv = map((x , y)-> x * y==0 ? "" : string(x) , ds.values.data, Δds.values.data)
-    str = join(lpad.(sv, 8))
-    hv = map(sv, 1:length(sv)) do s, i
-        s == "" ? "" : get(dic, i, "NA!")
-    end
-    strh = join(lpad.(hv, 8))
-    println(ios, strh)
-    println(stderr, strh)
-    println(ios, str)
-    println(stderr, str)
-end
 
-"""
-This is a bit logger. It is useable for interpreting the ABI 
-or 'Array fields', endinanness. In deed, it is easier to inspect 
-this than to implement a general USB feature report.
-Compare the bitlogger output with the feature reports in 
-'.julia_hid/DocumentationFo/'
-"""
-function logbitwise(ios, devconf, dsprev, ds)
-    stringbits = string(ds.values)
-    stringbitsprev = if length(dsprev.values.data) != length(ds.values.data)
-        stringbits
-    else
-        string(dsprev.values)
-    end
-    stringbitsdiff = map(stringbits, stringbitsprev) do c, cprev
-        if c == '\n'
-            '\n'
-        else
-            c == cprev ? " " : "_"
-        end
-    end |> join
-    # align the difference indication to what 'show' outputs
-    sbitsdiff = "\t" * split(stringbitsdiff, '\n')[2][2:end]
-    
-    println(ios, sbitsdiff)
-    println(ios, ds)
-    println(stderr, sbitsdiff)
-    println(stderr, ds.values)
-end
 
 
 
