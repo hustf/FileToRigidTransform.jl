@@ -17,9 +17,9 @@ Rotations are based on quaternions to facilitate screen-aligned rotation axes.
 See example/scriptwork.jl 
 
 ## TODO
-1) Interpretation logger
-2) (In configuration, add bit specification and possibly scalers..)
-3) Current quaternion logger
-4) Current quaternion callback
-5) Current transformation logger
-6) Current transformation callback
+1) More example configurations
+2) Current quaternion logger
+3) Current quaternion callback
+4) Current transformation logger
+5) Current transformation callback
+6) doc

@@ -19,11 +19,14 @@ const TIMEZERO = time()
 "String descriptors for a device from file name"
 struct DevConfig
     filename::String
-    bytebynamedict::Dict{String,Int}
+    specbynamedict::Dict{String, NamedTuple}
 end
 DevConfig()= DevConfig("", Dict{String, Int}())
 
-"A structure for 'show' dispatching. Could otherwise use Base.CodeUnits <: DenseArray, but we don't need the functionality."
+"""A structure for 'show' dispatching. Could 
+otherwise use Base.CodeUnits <: DenseArray, but we don't 
+need the functionality.
+"""
 struct Bytevector
     data::Vector{UInt8}
 end
@@ -42,19 +45,12 @@ DevState(v::Array, t, p) = DevState(Bytevector(v), t, p)
 include("show_devstate.jl")
 include("extract_from_rawdata.jl")
 include("loggers.jl")
+include("file_operations.jl")
 
-"Find device state change"
-function minus_ds(x::T, y::T) where {T <: DevState}
-    if length(x.values) == length(y.values)
-        DevState(x.values.data - y.values.data, x.timestamp - y.timestamp, x.proceed || y.proceed)
-    else
-        @debug "Could not subtract, vecor lengths, x $(length(x.values.data)), y $(length(y.values.data))"
-        x
-    end
-end
+
 
 """
-    subscribe(timeout = TIMEOUT, func = logbytewise) -> Vector{Task}
+    subscribe(timeout = TIMEOUT, logger = log_by_channel) -> Vector{Task}
 
 Start reacting to changes in device(s) state as given and updated in files. 
 The files which are present in a folder structure defines how the state is interpreted.
@@ -64,9 +60,9 @@ Default behaviour is logging the interpreted device state to a file and to scree
 Tip: To see error messages from failed tasks, display them individually, e.g. 
     julia> ans[1]
 """
-function subscribe(;timeout = TIMEOUT, func = logbytewise)
+function subscribe(;timeout = TIMEOUT, logger = log_by_channel)
     devconfvec = devices_configuration_vector()
-    monitor(devconfvec, timeout, func)
+    monitor(devconfvec, timeout, logger)
 end
 
 
@@ -79,22 +75,20 @@ Use folder structure to locate:
 
 If a configuration file is missing, a template file is generated based on the number of bytes in the device state file.
 
-We give warnings when folder structure is missing. Creating folders programmatically might cause difficulties concerning folder ownership.
+Give warnings when folder structure is missing. Creating folders programmatically might cause difficulties concerning folder ownership.
 """
 function devices_configuration_vector()
     dev_conf_vec = Vector{DevConfig}()
     if ispath(FOLDER)
         filenames = filter(isfile, readdir(FOLDER, join=true))
         shortfilenames = filenames .|> splitpath .|> last
-        if length(filenames) == 0
-            @info "Could not find a *.txt file in $fo .\n\tGenerate one using WinControllerToFile."
-        else
+        if length(filenames) != 0
             for (fi, shortfi) in zip(filenames, shortfilenames)
                 if ispath(CONFIGFO)
                     configfi = joinpath(CONFIGFO, shortfi)
                     if isfile(configfi)
                         # Found both a device state and a device configuration file.
-                        chdi = bytebyname(fi, configfi)
+                        chdi = specbyname(configfi)
                         if length(chdi) > 0
                             devconfig = DevConfig(shortfi, chdi)
                             push!(dev_conf_vec, devconfig)
@@ -106,16 +100,11 @@ function devices_configuration_vector()
                             @warn "Empty device configuration $shortfi"
                         end
                     else
-                        @info("Creating template configuration file $configfi")
-                        open(configfi, write = true) do ios
-                            println(ios, "# This file is read when calling FileToRigidTransformations.run()")
-                            println(ios, "# Assign names to byte positions. A channel is one byte. Reserved names for translation:")
-                            println(ios, "#Surge1 Surge2 Sway1  Sway2  Heave1 Heave2")
-                            println(ios, "# Reserved names for rotation:")
-                            println(ios, "#Roll1  Roll2  Pitch1 Pitch2 Yaw1   Yaw2  ")
-                            println(ios, " chn1 chn2 chn3 chn4 chn5 chn6 chn7 chn8 chn9 chn10 chn11 chn12 chn13 chn14 chn15 chn16")
-                        end
-                        @warn "Retry with new device configuration by rerunning FileToRigidTransform.run()"
+                        @info("Creating template configuration file\n\t$configfi")
+                        sourcefile = joinpath(@__DIR__, "..", "example", "config_template.txt")
+                        @assert isfile(sourcefile) joinpath(pwd(), sourcefile)
+                        cp(sourcefile, configfi, force= false)
+                        @warn "Retry with new device configuration by rerunning FileToRigidTransform.subscribe()"
                         return dev_conf_vec
                     end
                 else
@@ -124,6 +113,8 @@ function devices_configuration_vector()
                 end
             end
             @info("Configured $(length(dev_conf_vec)) usb pipelines")
+        else
+            @info "Could not find a *.txt file in $fo .\n\tGenerate one using WinControllerToFile."
         end
     else
         @info("You need to create folder $fo")
@@ -131,60 +122,8 @@ function devices_configuration_vector()
     end
     dev_conf_vec
 end
-"""
-    bytebyname(fi, configfi) -> Dict{String, Int}
 
-Make a channel name => byte no. dictionary given two corresponding file names.
-"""
-function bytebyname(fi, configfi)
-    statevec = devstate(fi).values
-    strconfigvec = configuration_vector(configfi)
-    pairs = (s=>i for (i, s) in enumerate(strconfigvec))
-    Dict{String, Int}(pairs)
-end
 
-"Read vector of strings from commented text file"
-function configuration_vector(filename)
-    strconfig = open(filename, read = true) do f
-        st = ""
-        if !eof(f)
-            st = readline(f)
-            while !eof(f) && startswith(st, "#") || st == ""
-                st = readline(f)
-            end
-        end
-        st
-    end
-    strip.(split(strconfig, " ", keepempty = false))
-end
-"Read current state from file"
-function devstate(filename)
-    st, tist = open(filename, read = true) do f
-        st = ""
-        tist = ""
-        if !eof(f)
-            st = readline(f)
-            while !eof(f) && startswith(st, "#") || st == ""
-                st = readline(f)
-            end
-        end
-        tist = ""
-        if !eof(f)
-            tist = readline(f)
-            while !eof(f) && startswith(tist, "#") || tist == ""
-                tist = readline(f)
-            end
-        end
-        st, tist
-    end
-    if st == "" || tist == ""
-        return DevState([], 0, false)
-    end
-    strstatevec =  split(st, " ", keepempty = false )
-    statevec = parse.(UInt8, strstatevec)
-    timestamp = parse(Float64, split(tist, " ", keepempty = false)[1])
-    DevState(statevec, timestamp, true)
-end
 
 """
     devstate_updated(timeout, filename) -> DevState
@@ -214,34 +153,34 @@ function devstate_updated(timeout, filename)
 end
 
 """
-    monitor(devconfvec, timeout, func) -> Vector{Task}
+    monitor(devconfvec, timeout, logger) -> Vector{Task}
 
-Monitor vector of devices. The 'func' argument is typically used for 
+Monitor vector of devices. The 'logger' argument is typically used for 
 for logging.
 
 Arguments to 'func' are (ios::IOstream, d::DevConfig, dsprev::DevState, ds::DevState)
 """
-function monitor(devconfvec, timeout, func)
+function monitor(devconfvec, timeout, logger)
     # Create file monitors
     monitors = Vector{Task}()
     for d in devconfvec
         fina = joinpath(FOLDER, d.filename)
-        monitor =  @async monitor_file(fina, d, timeout, func)
+        monitor =  @async monitor_file(fina, d, timeout, logger)
         push!(monitors, monitor)
     end
     monitors
 end
 
 
-
 """
 Monitor a single device. The given function argument is called at every update.
-Arguments to 'func' are (ios::IOstream, d::DevConfig, dsprev::DevState, ds::DevState)
+Arguments to 'logger' are (ios::IOstream, d::DevConfig, dsprev::DevState, ds::DevState)
 """
-function monitor_file(filename, d::DevConfig, timeout, func)
+function monitor_file(filename, d::DevConfig, timeout, logger)
     _, shfina = splitdir(filename)
     logfile = joinpath(TRANSFORMFO, shfina)
     t0 = localtime()
+    accumulated = Vector{Float64}()
     open(logfile, write = true) do ios
         ds = DevState()
         dsprev = ds
@@ -250,7 +189,7 @@ function monitor_file(filename, d::DevConfig, timeout, func)
             tpassed = localtime() - t0
             ds = devstate_updated(timeout-tpassed, filename)
             !dsprev.proceed && break
-            func(ios, d, dsprev, ds)
+            accumulated = logger(ios, d, accumulated, dsprev, ds)
             dsprev = ds
             if (tpassed > timeout)
                 @info "Exit monitor_file due to timeout $timeout s"

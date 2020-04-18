@@ -6,10 +6,8 @@
 
     julia> drophighbits(1, 0b11111111) |> FileToRigidTransform.bytestring
 """
-function drophighbits(n::Int, x::UInt8)
-    bitmask = 8:-1:(9 - n)
-    mask = UInt8(sum(2^(bitno -1) for bitno in bitmask))
-    UInt8(x & ~mask)
+function drophighbits(n::Int, x::T) where {T<:Unsigned}
+    (x << n) >> n
 end
 "Logical shift right n bits"
 droplowbits(n::Int, x::T) where {T<:Unsigned} = x >>> n
@@ -18,43 +16,64 @@ droplowbits(n::Int, x::T) where {T<:Unsigned} = x >>> n
 Given the value of the least significant byte, convert it to 
 a type large enough to store bit length
 """
-function convert_to_extracted_type(bitlength, lowbyte::UInt8)
+function extract_type(bitlength::Int)
     if bitlength <= 8
-        UInt8(lowbyte)
+        UInt8
     elseif bitlength <=16
-        UInt16(lowbyte)
+        UInt16
     elseif bitlength <=32
-        UInt32(lowbyte)
+        UInt32
     elseif bitlength <=64
-        UInt64(lowbyte)
+        UInt64
     elseif bitlength <=64
-        UInt64(lowbyte)
+        UInt64
     elseif bitlength <=128
-        UInt128(lowbyte)
+        UInt128
     else
-        error("Can't extract bitlength > 128, modify configuration!")
+        error("Can't work with > 128 bits, bitlength > 114")
     end
 end
 
-function exctract(bv::Bytevector, bytestartno, bitpad, bitlength, bigendian = true)
-    firstbyte = drophighbits(bitpad, bv[bytestartno])
+"""
+    extract(bv::Bytevector, bytepos, bitpad, bitlength; bigendian = false) -> UIntXXX
+
+Pull positive integer numbers from compact bit sequences. 
+'Bitpad' is the number of bits to ignore at the start of the first byte.
+"""
+function extract(bv::Bytevector, bytepos, bitpad, bitlength; bigendian = true)
+    @assert bitpad < 8  "At bytepos =  $bytepos bitpad = $bitpad is above range 0:7"
+    @assert bitpad >=0  "At bytepos =  $bytepos bitpad = $bitpad is below range 0:7"
     # Smallest integer larger than or equal to (bitlength + bitpad) / 8
     bytesourcelength = cld(bitlength + bitpad, 8)
-    dropbitsfromlastbyte = bytesourcelength * 8 - bitlength
-    # move the type assignment to separate function...
+    drop_n_lowbit = bytesourcelength * 8 -bitpad - bitlength
+    Extracttype = extract_type(bitlength)
+    Temptype = extract_type(bitlength + 14)
+    extractwithneighbours = Temptype(0)
     if bytesourcelength > 1
-        if bigendian
-            lastbyteindex = byteno + bytelength - 1
-            lastbyte = droplowbits(dropbitsfromlastbyte, bv[lastbyteindex])
-            # Deal with the last byte first, i.e. assume big-endian (unlikely)
-            convert_to_extracted_type(lastbyte)
-             # TO DO!! multiply by 255 and iterate, 
-        else
-            # TO DO!!
-        for i = 2:(bytelength - 2)
+        for i = 0:(bytesourcelength-1)
+             # i = 0: pick the least significant byte
+            byteno = if bigendian
+                    bytepos + i
+                else
+                    bytepos + bytesourcelength -1 -i
+                end
+            @assert byteno <= length(bv)  "bytepos =  $bytepos bitpad = $bitpad bitlength = $bitlength bigendian = $bigendian\n\texceeds data length = $(length(bv))"
+            thisbyte = bv[byteno]
+            extractwithneighbours += Temptype(thisbyte * 2^(i * 8))
         end
+        if bigendian
+            extractwith_1_neighbour = droplowbits(drop_n_lowbit, extractwithneighbours )            
+            extractval = Extracttype(drophighbits(bitpad, extractwith_1_neighbour))
+        else
+            extractwith_1_neighbour = drophighbits(drop_n_lowbit, extractwithneighbours )                
+            extractval = Extracttype(droplowbits(bitpad, extractwith_1_neighbour))
+        end
+        extractval
     else
-        return UInt8(droplowbits(dropbitsfromlastbyte, firstbyte))
+        @assert bytepos <= length(bv)  "bytepos =  $bytepos bitpad = $bitpad\n\texceeds $(length(bv))"
+        thisbyte = bv[bytepos]
+        x = drophighbits(bitpad, thisbyte) 
+        UInt8(droplowbits(drop_n_lowbit, x))
     end
-
 end
+

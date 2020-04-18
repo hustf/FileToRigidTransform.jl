@@ -1,0 +1,24 @@
+# FileToRigidTransform.subscribe() copies and renames this template to 
+#    'c:/users/~/.julia_hid/ConfigFo/$USBDEVICEPATH.txt'
+# for manual configuration of channel sources for a device by the user.
+#
+# The file name corresponds with file names in 'c:/users/~/.julia_hid/'. 
+# See WinControllerToFile.jl.
+# To get help adapting the configuration, run 
+#     FileToRigidTransform.subscribe(logger = FileToRigidTransform.log_by_bit_accumulate_changes, timeout = 60)
+# or alternative loggers:
+#                                    logger = FileToRigidTransform.log_by_bit
+#                                    logger = FileToRigidTransform.log_by_channel
+# You can define any channel names, but these are reserved for translations:
+#     Surge Sway Heave
+# Reserved names for rotation:
+#     Roll Pitch Yaw
+#
+# Channel    |      |      |      |      |      |      |      |      |      |      |      |      |      |      |      |      |      |      |      |
+    Hat   Roll  Pitch    Yaw Slider   But1   But2   But3   But4   But5   But6   But7   But8   But9  But10  But11  But12  But13  But14  But15  But16 
+# Bytepos    |      |      |      |      |      |      |      |      |      |      |      |      |      |      |      |      |      |      |      |
+      4      5      7      9     10      2      2      2      2      2      2      2      2      3      3      3      3      3      3      3      3  
+# Bitpad (don't use the first 'bitpad' bits)    |      |      |      |      |      |      |      |      |      |      |      |      |      |      |
+      2      2      2      0      0      7      6      5      4      3      2      1      0      7      6      5      4      3      2      1      0 
+# Bitlength  |      |      |      |      |      |      |      |      |      |      |      |      |      |      |      |      |      |      |      |
+      6     14     14      8      8      1      1      1      1      1      1      1      1      1      1      1      1      1      1      1      1 

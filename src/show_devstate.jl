@@ -73,6 +73,8 @@ function Base.show(io::IO, ds::DevState)
     print(io, ", ", ds.timestamp, ", ", ds.proceed, ")")
 end
 
+
+
 # The default Juno / Atom display works nicely with standard output
 Base.show(io::IO, ::MIME"application/prs.juno.inline", ds::DevState) = Base.show(io, v)
 
