@@ -94,7 +94,9 @@ function devices_configuration_vector()
                             push!(dev_conf_vec, devconfig)
                             if !ispath(TRANSFORMFO)
                                 @warn("Please create folder $TRANSFORMFO, then rerun")
-                                return dev_conf_vec
+                                #return dev_conf_vec
+                            else
+                                @info configfi
                             end
                         else
                             @warn "Empty device configuration $shortfi"
@@ -195,6 +197,8 @@ function monitor_file(filename, d::DevConfig, timeout, logger)
                 @info "Exit monitor_file due to timeout $timeout s"
                 break
             end
+            println(tpassed, "  ", ds.timestamp)
+
             flush(ios)
         end
         ds

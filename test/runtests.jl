@@ -75,30 +75,95 @@ using Test, FileToRigidTransform
     droplowbits(1, UInt128(5)) == 2
 end
 using Test, FileToRigidTransform
-@testset "extract 1 byte or less" begin
+@testset "Extract 1 byte or less from within one byte" begin
     import FileToRigidTransform: Bytevector, extract_type,
                                  extract, bytestring,
-                                 droplowbits, drophighbits
+                                 droplowbits, drophighbits,
+                                 bitlength_ceiling
     v = [0, 127, 255]
     bv = Bytevector(v)
-    bytestartindex = 1
+    bytepos = 1
     bitpad = 0
     bitlength = 8
-    @test extract(bv, bytestartindex, bitpad, bitlength, bigendian = true) == 0
-    @test extract(bv, 2, bitpad, bitlength, bigendian = true) == 127
-    bytestartindex = 3
-    @test extract(bv, bytestartindex, bitpad, bitlength, bigendian = true) == 255
-    @test extract(bv, bytestartindex, 1, 7, bigendian = true) == 127
-    @test extract(bv, bytestartindex, 2, 6, bigendian = true) == 63
-    bytestartindex = 2
+    bigendian = true
+    @test extract(bv, bytepos, bitpad, bitlength, bigendian = bigendian) == 0
+    bytepos = 2
+    @test extract(bv, bytepos, bitpad, bitlength, bigendian = bigendian) == 127
+    bytepos = 3
+    @test extract(bv, bytepos, bitpad, bitlength, bigendian = bigendian) == 255
+    bitpad = 1; bitlength = 7
+    @test extract(bv, bytepos, bitpad, bitlength, bigendian = bigendian) == 127
+    bitpad = 2; bitlength = 6
+    @test extract(bv, bytepos, bitpad, bitlength, bigendian = bigendian) == 63
+    bytepos = 2
     bitpad = 1
     bitlength = 7
-    @test extract(bv, bytestartindex, 1, 7) == 127
-    @test extract(bv, bytestartindex, 1, 6) == 63
+    @test extract(bv, bytepos, 1, 7) == 127
+    @test extract(bv, bytepos, 1, 6) == 63
     bitpad = 2; bitlength = 6
-    @test extract(bv, bytestartindex, bitpad, bitlength) == 63
-    bytestartindex = 2; bitpad = 0; bitlength = 16;     bigendian = true
-    @test extract(bv, bytestartindex, bitpad, bitlength, bigendian=bigendian) == 0b1111111101111111
+    @test extract(bv, bytepos, bitpad, bitlength) == 63
+end
+
+@testset "Extract 1 byte or less, crossing two source bytes" begin
+    import FileToRigidTransform: Bytevector, extract_type,
+                                 extract, bytestring,
+                                 droplowbits, drophighbits,
+                                 bitlength_ceiling
+    v = [1, 192]
+    bv = Bytevector(v)
+    bytepos = 1
+    bitpad = 7
+    bitlength = 3
+    bigendian = true
+    @test extract(bv, bytepos, bitpad, bitlength, bigendian = bigendian) == 0b111
     bigendian = false
-    @test extract(bv, bytestartindex, bitpad, bitlength, bigendian=bigendian) == 0b111111111111111
+    @test extract(bv, bytepos, bitpad, bitlength, bigendian = bigendian) == 0b111
+    v = [255, 255]
+    bv = Bytevector(v)
+    bigendian = true
+    @test extract(bv, bytepos, bitpad, bitlength, bigendian = bigendian) == 0b111
+    bigendian = false
+    @test extract(bv, bytepos, bitpad, bitlength, bigendian = bigendian) == 0b111
+    v = [0, 255, 0, 255]
+    bv = Bytevector(v)
+    bytepos = 1
+    bitpad = 7
+    bitlength = 11
+    bigendian = true
+    @test extract(bv, bytepos, bitpad, bitlength, bigendian = bigendian) == 0b00111111110
+    bigendian = false
+    @test extract(bv, bytepos, bitpad, bitlength, bigendian = bigendian) == 0b01111111100
+end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+using Test
+@testset "extract more than 1 byte or less" begin
+    import FileToRigidTransform: Bytevector, extract_type,
+        extract, bytestring,
+        droplowbits, drophighbits
+    v = [255, 255, 255]
+    bv = Bytevector(v)
+    bytepos = 1; bitpad = 0; bitlength = 16;     bigendian = true
+    @test extract(bv, bytepos, bitpad, bitlength, bigendian=bigendian) == 0b1111111111111111
+    bigendian = false
+    @test extract(bv, bytepos, bitpad, bitlength, bigendian=bigendian) == 0b1111111111111111
+    bytepos = 1; bitpad = 1; bitlength = 16;     bigendian = true
+    @test extract(bv, bytepos, bitpad, bitlength, bigendian=bigendian) == 0b1111111111111111
 end
