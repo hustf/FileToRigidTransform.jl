@@ -136,7 +136,7 @@ If the file is (momentarily) unreadable, retry during RETRY_TIME.
 function devstate_updated(timeout, filename)
     prevstate = devstate(filename)
     # Yield to other tasks while waiting for file change
-    fileevent = watch_file(filename, timeout)
+    fileevent = watch_file(filename, timeout)  # does not exit by itself after timeout actually.
     if fileevent.renamed || fileevent.timedout
         return DevState(prevstate.values, prevstate.timestamp, false)
     end
@@ -148,7 +148,7 @@ function devstate_updated(timeout, filename)
         sleep(0.01)
         ds = devstate(filename)
     end
-    if localtime() - t0 >= RETRY_TIME + 0.01
+    if localtime() - t0 >= RETRY_TIME + 0.01   ##?
         @warn "No state read from \n\t$filename \n\tin $RETRY_TIME s. If WinControllerToFile.subscribe() is running, you may have to populate the file by giving input through the device"
     end
     ds
@@ -197,14 +197,13 @@ function monitor_file(filename, d::DevConfig, timeout, logger)
                 @info "Exit monitor_file due to timeout $timeout s"
                 break
             end
-            println(tpassed, "  ", ds.timestamp)
-
             flush(ios)
         end
         ds
     end
     @info "Exit logging to \n\t$logfile \n\tafter $(floor(localtime()-t0)) s"
 end
+
 localtime() = time() - TIMEZERO
 
 

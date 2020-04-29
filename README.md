@@ -1,9 +1,13 @@
 # FileToRigidTransform
 This package polls the last recorded state of Usb controllers like spacemice or joysticks. The state is recorded in files by [WinControllerToFile](https://github.com/hustf/WinControllerToFile.jl). The files are updated at state changes, and contain a time stamp.
 
-This package integrates the controller(s) state(s) over time, and updates corresponding states for rigid transforms. You assign controller axes to rotations and translations through configuration files for each controller. 
+Currently, the 'transform' part is not actually implemented. The reason being difficulties in interpreting the output from six-dof controllers. Mine seem to intentionally obfuscate their output. Interpreting data from a joystick works fine, though.
 
-Rotations are based on quaternions to facilitate screen-aligned rotation axes.
+The bitwise loggers and compact data extractor may be useful in other projects.
+
+The plan was to integratete the controller(s) state(s) over time, and update corresponding states for rigid transforms. You would assign controller axes to rotations and translations through configuration files for each controller. 
+
+Rotations would be based on quaternions to facilitate screen-aligned rotation axes.
 
 ## Installation
 
